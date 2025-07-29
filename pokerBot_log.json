@@ -1,0 +1,20 @@
+[
+  {
+    "timestamp": 1753811885534,
+    "step": "preflop",
+    "hand": [
+      "7d",
+      "Ad"
+    ],
+    "community": [],
+    "pot": 1000,
+    "minBet": 1000,
+    "numPlayers": 3,
+    "bankroll": 41000,
+    "winRate": 0.41179999999999994,
+    "decision": {
+      "action": "Fold",
+      "amount": 0
+    }
+  }
+]
