@@ -25,6 +25,27 @@ node bot2.js
 
 Suivez les instructions dans le terminal pour entrer votre main, les cartes communes, le pot, la bankroll, etc. Le bot vous indiquera la meilleure action à chaque étape.
 
+## Conventions de saisie
+
+### Cartes
+- Format attendu : `<valeur><sorte>`
+- Valeurs :
+  - 1 = As, 2–10 = chiffres, 11 = Valet, 12 = Dame, 13 = Roi
+- Sortes :
+  - `co` = cœur (h)
+  - `ca` = carreau (d)
+  - `tr` = trèfle (c)
+  - `pi` = pique (s)
+- Exemples :
+  - `13pi` = Roi de pique
+  - `2co` = 2 de cœur
+
+### Montants
+- Les montants peuvent être saisis en chiffres ou avec le suffixe `k` pour les milliers.
+- Exemples :
+  - `1500` = 1500
+  - `2k` = 2000
+
 ## Fichiers principaux
 - `bot2.js` : version principale du bot interactif
 - `bot.js` : version alternative ou ancienne
