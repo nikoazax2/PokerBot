@@ -92,9 +92,10 @@ function makeDecision(hand, community, pot, minBet, numPlayers, bankroll) {
 
     // Seuils de probabilité (ajustables)
     const foldThreshold = 0.18; // < 18% : se coucher
-    const callThreshold = 0.40; // 18-40% : suivre si peu cher
-    const raiseThreshold = 0.40; // > 40% : relancer si possible
+    const callThreshold = 0.50; // 18-40% : suivre si peu cher
+    const raiseThreshold = 0.50; // > 40% : relancer si possible
 
+    // Se coucher
     if (winRate < foldThreshold && minBet > 0) {
         action = 'Coucher';
         const red = '\x1b[31m';
