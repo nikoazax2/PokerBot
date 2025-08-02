@@ -13,6 +13,8 @@
     "deck-of-cards": "^0.1.8",
     "poker-evaluator": "^2.1.0",
     "prompt-sync": "^4.2.0",
-    "readline-sync": "^1.4.10"
+    "readline-sync": "^1.4.10",
+    "screenshot-desktop": "^1.15.1",
+    "tesseract.js": "^6.0.1"
   }
 }

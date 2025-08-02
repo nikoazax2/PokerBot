@@ -1,6 +1,8 @@
 const PokerEvaluator = require('poker-evaluator');
 const readlineSync = require('readline-sync');
 
+const aggressiveness = 2; // Niveau d'agressivité du bot (0.5 = prudent, 1 = normal, 1.5 = agressif)
+
 // Conversion de la saisie en format poker-evaluator
 function convertCard(card) {
     const c = card.toLowerCase();
@@ -58,7 +60,7 @@ function evaluateOdds(hand, community, numPlayers) {
 }
 
 // Prise de decision du bot et montant de relance
-function makeDecision(hand, community, pot, minBet, numPlayers, bankroll) {
+function makeDecision(hand, community, pot, minBet, numPlayers, bankroll, aggressiveness = 1) {
     console.log(`Calcul des chances de gagner pour la main: ${hand.join(', ')} et les cartes communes: ${community?.join(', ')} avec ${numPlayers} joueurs dans le coup. Avec une mise minimale de ${minBet}, un pot de ${pot} et votre bankroll de ${bankroll}.`);
 
     console.log('\n\n');
@@ -93,7 +95,9 @@ function makeDecision(hand, community, pot, minBet, numPlayers, bankroll) {
     // Seuils de probabilité (ajustables)
     const foldThreshold = 0.18; // < 18% : se coucher
     const callThreshold = 0.40; // 18-40% : suivre si peu cher
-    const raiseThreshold = 0.40; // > 40% : relancer si possible
+    // Le paramètre d'agressivité module le seuil de relance et la taille de la relance
+    // aggressiveness = 1 (par défaut), <1 = prudent, >1 = agressif
+    const raiseThreshold = 0.33 - 0.10 * (aggressiveness - 1); // Plus agressif = seuil plus bas
 
     if (winRate < foldThreshold && minBet > 0) {
         action = 'Coucher';
@@ -122,19 +126,40 @@ function makeDecision(hand, community, pot, minBet, numPlayers, bankroll) {
         return { action, amount };
     }
 
-    // Si la probabilité est bonne, relancer
+    // Gestion du risque : si la mise minimale est trop élevée par rapport à la bankroll, ne pas relancer
+    const minBetPct = bankroll > 0 ? minBet / bankroll : 1;
     if (winRate >= raiseThreshold) {
-        // Nouveau calcul : montant max = min(50% du pot, 30% de la bankroll)
-        let maxRaisePot = Math.floor(pot * 0.5);
-        let maxRaiseBankroll = Math.floor(bankroll * 0.5);
-        let raiseAmount = Math.min(maxRaisePot, maxRaiseBankroll);
-        // On peut ajuster le raise en fonction du winRate si besoin, mais on ne dépasse pas le plafond
-        if (raiseAmount < minBet) raiseAmount = minBet;
-        action = 'Relancer';
-        amount = raiseAmount;
-        const green = '\x1b[32m';
-        console.log(`${bold}${green}Décision : Relancer (Raise) à ${raiseAmount} (plafond: 50% pot ou 30% bankroll)${resetColor}`);
-        return { action, amount };
+        if (minBetPct > 0.5) {
+            // Mise trop élevée, se coucher même avec une bonne main
+            action = 'Coucher';
+            const red = '\x1b[31m';
+            console.log(`${bold}${red}Décision : Se coucher (Fold) car la mise minimale (${minBet}) > 50% de la bankroll (${bankroll})${resetColor}`);
+            return { action, amount };
+        } else if (minBetPct > 0.3) {
+            // Trop risqué de relancer, mais on peut suivre si la proba est bonne
+            action = 'Suivre';
+            amount = minBet;
+            const yellow = '\x1b[33m';
+            console.log(`${bold}${yellow}Décision : Suivre (Call) car la mise minimale (${minBet}) > 30% de la bankroll, relance trop risquée${resetColor}`);
+            return { action, amount };
+        } else {
+            // Plus agressif : montant max = min(80% du pot, 50% de la bankroll) modulé par l'agressivité
+            let maxRaisePot = Math.floor(pot * (0.8 * aggressiveness));
+            let maxRaiseBankroll = Math.floor(bankroll * (0.5 * aggressiveness));
+            let maxRaise = Math.min(maxRaisePot, maxRaiseBankroll);
+
+            // Modulation selon winRate et agressivité
+            let factor = (winRate - raiseThreshold) / (1 - raiseThreshold);
+            factor = Math.max(0, Math.min(1, factor));
+            let raiseAmount = Math.floor(minBet + factor * (maxRaise - minBet));
+            if (raiseAmount < minBet) raiseAmount = minBet;
+            action = 'Relancer';
+            amount = raiseAmount;
+            const green = '\x1b[32m';
+            console.log(`${bold}${green}Décision : Relancer (Raise) à ${raiseAmount} (modulé selon winRate, agressivité, plafond: ${Math.floor(0.8 * aggressiveness * 100)}% pot ou ${Math.floor(0.5 * aggressiveness * 100)}% bankroll)${resetColor}`);
+
+            return { action, amount };
+        }
     }
 
     // Si la probabilité est moyenne, suivre si la mise est raisonnable
@@ -176,8 +201,8 @@ function makeDecision(hand, community, pot, minBet, numPlayers, bankroll) {
 // Boucle principale
 
 function pokerBot() {
-    console.clear();
-    console.log('=== Poker Bot (flop → turn → river avec relances adverses) ===');
+    console.clear(); 
+    console.log(`=== Poker Bot - ${aggressiveness<= 0.5 ? 'Prudent' : aggressiveness <= 1 ? 'Normal' : 'Agressif'} ===`);
 
     // Declare variables once
     let hand, pot, minBet, numPlayers, decision, bankroll;
@@ -185,7 +210,7 @@ function pokerBot() {
 
     // pre-flop
     ({ hand, pot, minBet, numPlayers, bankroll } = getStreetInput('pre-flop', true));
-    decision = makeDecision(hand, community, pot, minBet, numPlayers, bankroll);
+    decision = makeDecision(hand, community, pot, minBet, numPlayers, bankroll, aggressiveness);
 
     // flop
     let flopInput = getStreetInput('flop');
@@ -195,13 +220,13 @@ function pokerBot() {
     pot = flopInput.pot;
     minBet = flopInput.minBet;
     numPlayers = flopInput.numPlayers;
-    decision = makeDecision(hand, community, pot, minBet, numPlayers, bankroll);
+    decision = makeDecision(hand, community, pot, minBet, numPlayers, bankroll, aggressiveness);
     let relance = readlineSync.question('Quelqu\'un a-t-il relancé au flop ? (o/n): ', { defaultInput: 'n' }).toLowerCase();
     if (relance === 'o') {
         const newMinBetInput = readlineSync.question('Nouvelle mise minimale à suivre / relancer: ');
         minBet = newMinBetInput.trim() === '' ? 0 : parseInt(newMinBetInput, 10);
         numPlayers = parseInt(readlineSync.question('Nombre de joueurs ayant suivi la relance (incl. vous): '), 10);
-        decision = makeDecision(hand, community, pot, minBet, numPlayers, bankroll);
+        decision = makeDecision(hand, community, pot, minBet, numPlayers, bankroll, aggressiveness);
     }
 
     // turn
@@ -210,13 +235,13 @@ function pokerBot() {
     pot = turnInput.pot;
     minBet = turnInput.minBet;
     numPlayers = turnInput.numPlayers;
-    decision = makeDecision(hand, community, pot, minBet, numPlayers, bankroll);
+    decision = makeDecision(hand, community, pot, minBet, numPlayers, bankroll, aggressiveness);
     relance = readlineSync.question('Quelqu\'un a-t-il relancé au turn ? (o/n): ', { defaultInput: 'n' }).toLowerCase();
     if (relance === 'o') {
         const newMinBetInput = readlineSync.question('Nouvelle mise minimale à suivre / relancer: ');
         minBet = newMinBetInput.trim() === '' ? 0 : parseInt(newMinBetInput, 10);
         numPlayers = parseInt(readlineSync.question('Nombre de joueurs ayant suivi la relance (incl. vous): '), 10);
-        decision = makeDecision(hand, community, pot, minBet, numPlayers, bankroll);
+        decision = makeDecision(hand, community, pot, minBet, numPlayers, bankroll, aggressiveness);
     }
 
     // river
@@ -225,13 +250,13 @@ function pokerBot() {
     pot = riverInput.pot;
     minBet = riverInput.minBet;
     numPlayers = riverInput.numPlayers;
-    decision = makeDecision(hand, community, pot, minBet, numPlayers, bankroll);
+    decision = makeDecision(hand, community, pot, minBet, numPlayers, bankroll, aggressiveness);
     relance = readlineSync.question('Quelqu\'un a-t-il relancé à la river ? (o/n): ', { defaultInput: 'n' }).toLowerCase();
     if (relance === 'o') {
         const newMinBetInput = readlineSync.question('Nouvelle mise minimale à suivre / relancer: ');
         minBet = newMinBetInput.trim() === '' ? 0 : parseInt(newMinBetInput, 10);
         numPlayers = parseInt(readlineSync.question('Nombre de joueurs ayant suivi la relance (incl. vous): '), 10);
-        decision = makeDecision(hand, community, pot, minBet, numPlayers, bankroll);
+        decision = makeDecision(hand, community, pot, minBet, numPlayers, bankroll, aggressiveness);
     }
 }
 

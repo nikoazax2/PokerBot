@@ -1,12 +1,14 @@
+
 # PokerBot
 
-Un bot de poker interactif en Node.js qui aide à prendre des décisions (fold, call, raise) selon la probabilité de victoire calculée à chaque street (pré-flop, flop, turn, river).
+Un bot de poker interactif en Node.js qui aide à prendre des décisions (fold, call, raise, bluff) selon la probabilité de victoire calculée à chaque street (pré-flop, flop, turn, river). L'historique de chaque partie est enregistré automatiquement dans un fichier JSON.
 
 ## Fonctionnalités
 - Saisie manuelle des cartes et des montants via le terminal
 - Calcul automatique des probabilités de victoire avec la librairie `poker-evaluator`
-- Prise de décision basée sur la probabilité et la situation (bankroll, pot, mise minimale)
+- Prise de décision basée sur la probabilité, la situation (bankroll, pot, mise minimale), l'agressivité et le bluff
 - Affichage des conseils et des montants à jouer
+- Historique complet de toutes les parties dans `historique.json` (date, heure, main, communauté, bankroll, décision...)
 
 ## Installation
 
@@ -20,10 +22,10 @@ Un bot de poker interactif en Node.js qui aide à prendre des décisions (fold, 
 
 Lancez le bot avec Node.js :
 ```bash
-node bot2.js
+node bot3.js
 ```
 
-Suivez les instructions dans le terminal pour entrer votre main, les cartes communes, le pot, la bankroll, etc. Le bot vous indiquera la meilleure action à chaque étape.
+Suivez les instructions dans le terminal pour entrer votre main, les cartes communes, le pot, la bankroll, etc. Le bot vous indiquera la meilleure action à chaque étape et enregistrera la partie dans l'historique.
 
 ## Conventions de saisie
 
@@ -47,13 +49,15 @@ Suivez les instructions dans le terminal pour entrer votre main, les cartes comm
   - `2k` = 2000
 
 ## Fichiers principaux
-- `bot2.js` : version principale du bot interactif
+- `bot3.js` : version principale du bot interactif (avec historique JSON)
+- `bot2.js` : version précédente
 - `bot.js` : version alternative ou ancienne
-- `pokerBot_log.json` : journal des parties (optionnel)
+- `historique.json` : historique complet des parties jouées
 
 ## Personnalisation
 - Les seuils de décision (fold/call/raise) sont modifiables dans le code.
 - Le pourcentage de bankroll utilisé pour les relances est ajustable (par défaut 50%).
+- Le niveau d'agressivité et la fréquence de bluff sont configurables en haut du script.
 
 ## Dépendances
 - [poker-evaluator](https://www.npmjs.com/package/poker-evaluator)
