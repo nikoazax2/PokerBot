@@ -1,384 +1,462 @@
+// === Dépendances ===
 const PokerEvaluator = require('poker-evaluator');
 const readlineSync = require('readline-sync');
 const fs = require('fs');
 const path = require('path');
 const { randomUUID } = require('crypto');
 const screenshot = require('./screenshot-util');
-const Tesseract = require('tesseract.js');
+const { createWorker } = require('tesseract.js');
+const nodeTesseract = require('node-tesseract-ocr');
+const { exec } = require('child_process');
+const sharp = require('sharp');
 
-const aggressiveness = 1; // Niveau d'agressivité du bot (0.5 = prudent, 1 = normal, 1.5 = agressif)
-const bluffingEnabled = true; // Activer/désactiver le comportement de bluff
-const bluffFrequency = 0.2;   // Fréquence de bluff (ex. 0.2 = 20% de chances de bluffer aux situations opportunes)
-
-// Conversion de la saisie en format poker-evaluator
-function convertCard(card) {
-    const c = card.toLowerCase();
-    const m = c.match(/^(\d+)(co|ca|tr|pi)$/);
-    if (!m) return card;
-    const [, num, suit] = m;
-    const rank = { '1': 'A', '10': 'T', '11': 'J', '12': 'Q', '13': 'K' }[num] || num;
-    const suitLetter = { co: 'h', ca: 'd', tr: 'c', pi: 's' }[suit] || '';
-    return rank + suitLetter;
+// === S'assurer que Tesseract natif est dans le PATH ===
+const tessDir = "C:\\Program Files\\Tesseract-OCR";
+if (!process.env.PATH.toLowerCase().includes(tessDir.toLowerCase())) {
+  process.env.PATH = `${tessDir};${process.env.PATH}`;
 }
 
-// Lecture des inputs pour chaque street
-async function getStreetInput(streetName, needHand = false) {
-    let hand = null, community = null, pot = null, minBet = null, numPlayers = null, bankroll = null;
-    // Capture d'écran à chaque étape (écran 0 par défaut)
-    const screenshotsDir = path.join(__dirname, 'screenshots');
-    if (!fs.existsSync(screenshotsDir)) fs.mkdirSync(screenshotsDir);
-    const screenshotPath = path.join(screenshotsDir, `${streetName}_${Date.now()}.png`);
+// === Configuration du bot ===
+const aggressiveness = 1; // 0.5 prudent, 1 normal, >1 agressif
+const bluffingEnabled = true;
+const bluffFrequency = 0.2; // 20%
 
-    //listScreens
-    const screens = await screenshot.listScreens();
-    console.log('Écrans disponibles:');
-    screens.forEach(screen => {
-        console.log(`- ${screen.name} (id: ${screen.id}, bounds: ${JSON.stringify(screen.bounds)})`);
-    });
+// === Constantes OCR / parsing ===
+const RANKS = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '3', '2'];
+const BLINDS_REGEX = /(\d{1,4})\s*[-–]\s*(\d{1,4})/;
+const NUMBER_REGEX = /(\d{2,6})/g;
+const DEFAULT_COMMUNITY_SUITS = ['h', 'c', 'd', 's', 'h']; // cycle pour heuristique
 
+// === Helpers OCR ===
+async function recognizeText(imagePath) {
+  const nativeConfig = {
+    lang: 'eng',
+    oem: 1,
+    psm: 6,
+    tessedit_char_whitelist: 'AKQJT98765432HDCS0123456789-:.'
+  };
+
+  const hasNative = await new Promise(res => {
+    exec('tesseract --version', err => res(!err));
+  });
+
+  if (hasNative) {
     try {
-        // await screenshot({ filename: screenshotPath, screenId: `'\\.\\DISPLAY1'` });
-       await screenshot({ filename: screenshotPath, screenId: `\\\\.\\DISPLAY1` }); 
-        
-        //  await Promise.all(screens.map((screen, idx) => {
-        //         console.log(`Capturing screenshot for screen ${idx} (${screen.name})...`);
-        //     }));
-        //     console.log(`Screenshot sauvegardé: ${screenshotPath}`);
-    } catch (err) {
-        console.error('Erreur screenshot:', err);
+      return await nodeTesseract.recognize(imagePath, nativeConfig);
+    } catch (e) {
+      console.warn('OCR natif a échoué, fallback vers tesseract.js:', e.message);
     }
+  }
 
-    // Analyse du screenshot pour extraire les informations (placeholder pour OCR)
-    ({ hand, community, pot, minBet, numPlayers, bankroll } = await OCRInput(screenshotPath, streetName, needHand));
-
-    //wait 50sec
-    await new Promise(resolve => setTimeout(resolve, 50000));
-    // Les valeurs sont nulles ou vides, à remplacer par extraction OCR plus tard
-    return { hand, community, pot, minBet, numPlayers, bankroll };
+  const worker = createWorker({ logger: () => {} });
+  await worker.load();
+  await worker.loadLanguage('eng');
+  await worker.initialize('eng');
+  await worker.setParameters({
+    tessedit_char_whitelist: 'AKQJT98765432HDCS0123456789-:.',
+    tessedit_pageseg_mode: '6',
+  });
+  const { data: { text } } = await worker.recognize(imagePath);
+  await worker.terminate();
+  return text;
 }
 
-async function OCRInput(screenshotPath, streetName, needHand = false) {
-    const { data: { text } } = await Tesseract.recognize(screenshotPath, 'eng');
-    console.log(text);
-
-    // Ici, il faut parser le texte pour extraire les infos
-    // Exemple simple (à adapter selon la disposition de l'écran) :
-    // hand = ...; community = ...; pot = ...; minBet = ...; numPlayers = ...; bankroll = ...;
-    // Utiliser des regex ou des split pour trouver les valeurs dans le texte
-    return { hand, community, pot, minBet, numPlayers, bankroll };
+async function preprocess(imagePath) {
+  const buf = await sharp(imagePath)
+    .grayscale()
+    .normalize()
+    .threshold(150)
+    .toBuffer();
+  const tmp = path.join(path.dirname(imagePath), `preproc_${path.basename(imagePath)}`);
+  await fs.promises.writeFile(tmp, buf);
+  return tmp;
 }
 
-// Calcul de la probabilité de victoire
+function extractRankTokens(raw) {
+  let s = raw.toUpperCase();
+  s = s.replace(/I0/g, '10').replace(/1O/g, '10'); // confusions
+  s = s.replace(/[^A-Z0-9\s]/g, ' ');
+  const tokens = s.split(/\s+/).filter(Boolean);
+  return tokens.map(t => {
+    if (t === 'T') return '10';
+    if (RANKS.includes(t)) return t;
+    return null;
+  }).filter(Boolean);
+}
+
+function ensureFullHandInteractive(hand) {
+  return hand.map(card => {
+    if (!/[HDCS]$/i.test(card)) {
+      let full;
+      while (true) {
+        full = readlineSync.question(`La carte "${card}" manque de couleur. Donne-la complète (ex: Ah, Ks): `).trim().toUpperCase();
+        if (/^[AKQJT98765432]{1,2}[HDCS]$/i.test(full)) break;
+        console.log('Format invalide, réessaie.');
+      }
+      return full;
+    }
+    return card.toUpperCase();
+  });
+}
+
+// Construire community avec suits par défaut, puis proposer override
+function completeCommunityWithSuits(ranks) {
+  const defaultCards = ranks.map((r, i) => {
+    const suit = DEFAULT_COMMUNITY_SUITS[i % DEFAULT_COMMUNITY_SUITS.length];
+    return `${r}${suit}`; // ex: 'Kh'
+  });
+  console.log(`Flop/Board détecté (rangs) : ${ranks.join(' ')}`);
+  const override = readlineSync.question(`Si tu veux préciser les suits du board, entre 5 cartes (ex: Kh 5c 2c Jd Ts), sinon appuie sur Entrée pour utiliser [${defaultCards.join(' ')}]: `).trim();
+  if (override) {
+    const parts = override.split(/\s+/).filter(p => p.length >= 2);
+    if (parts.length >= 3) {
+      // on prend jusqu'à 5
+      return parts.slice(0, 5).map(p => p.toUpperCase());
+    }
+  }
+  return defaultCards.slice(0, Math.min(5, ranks.length));
+}
+
+// === Parsing OCR simplifié ===
+async function OCRInput(screenshotPath, streetName = '', needHand = false) {
+  let hand = [];
+  let community = [];
+  let pot = 0;
+  let minBet = 0;
+  let numPlayers = 2;
+  let bankroll = 0;
+
+  // prétraitement (silencieux en cas d'échec)
+  let pathForOCR = screenshotPath;
+  try {
+    pathForOCR = await preprocess(screenshotPath);
+  } catch (_) { }
+
+  const rawText = await recognizeText(pathForOCR);
+  const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+  console.log(`--- OCR brut (${streetName}) ---\n${rawText}\n-----------------------------`);
+
+  // minBet : check ou blinds
+  if (/\bCHECK\b/i.test(rawText) || /\bC\b/.test(rawText)) {
+    minBet = 0;
+  } else {
+    const blindMatch = rawText.match(BLINDS_REGEX);
+    if (blindMatch) {
+      minBet = parseInt(blindMatch[2], 10); // big blind
+    }
+  }
+
+  // extraire tous les nombres valides
+  const numberCandidates = Array.from(new Set(
+    (rawText.match(/[\d\.\,]{2,7}/g) || [])
+      .map(tok => tok.replace(/[^\d]/g, ''))
+      .filter(n => n.length)
+      .map(n => parseInt(n, 10))
+      .filter(n => !isNaN(n))
+  )).sort((a, b) => a - b);
+
+  // bankroll : plus grand
+  if (numberCandidates.length) {
+    bankroll = numberCandidates[numberCandidates.length - 1];
+  }
+
+  // pot : plus grand < bankroll sinon médian
+  if (numberCandidates.length) {
+    const below = numberCandidates.filter(n => n < bankroll);
+    if (below.length) pot = below[below.length - 1];
+    else pot = numberCandidates[Math.floor(numberCandidates.length / 2)];
+  }
+
+  // main : recherche de deux ranks consécutifs dans une ligne
+  if (needHand) {
+    let found = false;
+    for (const line of lines) {
+      const match = line.match(/\b(A|K|Q|J|10|9|8|7|6|5|4|3|2)\s+(A|K|Q|J|10|9|8|7|6|5|4|3|2)\b/i);
+      if (match) {
+        hand = [match[1].toUpperCase(), match[2].toUpperCase()];
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      const rankTokens = extractRankTokens(rawText);
+      if (rankTokens.length >= 2) {
+        hand = [rankTokens[0], rankTokens[1]];
+      }
+    }
+    if (hand.length === 2) {
+    //   hand = ensureFullHandInteractive(hand); // demander suits si manquants
+    }
+  }
+
+  // community (board)
+  const rankTokens = extractRankTokens(rawText);
+  const filtered = hand.map(h => h.replace(/[HDCS]$/i, '')).filter(Boolean);
+  const boardRanks = rankTokens.filter(r => !filtered.includes(r));
+  // enlever doublons en préservant ordre
+  const uniq = [];
+  for (const r of boardRanks) {
+    if (!uniq.includes(r)) uniq.push(r);
+  }
+  const top5 = uniq.slice(0, 5); // ex: ['K','5','2','J','10']
+  community = completeCommunityWithSuits(top5); // ajoute suits ou demande override
+
+  // numPlayers heuristique : stacks distincts + toi
+  const stackCandidates = numberCandidates.filter(n => n > 100 && n !== bankroll && n !== pot);
+  const uniqStacks = [...new Set(stackCandidates)];
+  numPlayers = Math.max(2, uniqStacks.length + 1);
+
+  return {
+    hand,
+    community,
+    pot,
+    minBet,
+    numPlayers,
+    bankroll,
+    rawText,
+    lines,
+  };
+}
+
+// === Évaluation et décision ===
 function evaluateOdds(hand, community, numPlayers) {
-    return PokerEvaluator
-        .winningOddsForPlayer(hand, community, numPlayers, 2000)
-        .winRate;
+  if (!Array.isArray(hand) || hand.length !== 2) return 0;
+  if (!Array.isArray(community)) community = [];
+  return PokerEvaluator
+    .winningOddsForPlayer(hand, community, numPlayers, 2000)
+    .winRate;
 }
 
-// Prise de décision du bot et montant de relance
 function makeDecision(hand, community, pot, minBet, numPlayers, bankroll, aggressiveness = 1) {
-    console.log(`Calcul des chances de gagner pour la main: ${hand.join(', ')} et les cartes communes: ${community?.join(', ')} avec ${numPlayers} joueurs dans le coup. Mise minimale à suivre: ${minBet}, Pot: ${pot}, Bankroll: ${bankroll}.`);
-    console.log('\n');
+  hand = hand || [];
+  community = community || [];
+  bankroll = bankroll || 0;
+  pot = pot || 0;
+  minBet = minBet || 0;
+  numPlayers = numPlayers || 2;
 
-    const winRate = evaluateOdds(hand, community || [], numPlayers);
-    const pct = (winRate * 100).toFixed(1);
-    const bold = '\x1b[1m';
-    const resetColor = '\x1b[0m';
-    console.log(`${bold}Probabilité de gagner : ${pct}%${resetColor}`);
+  console.log(`Main: ${hand.join(', ')}, Board: ${community.join(' ')}, Pot: ${pot}, MinBet: ${minBet}, Bankroll: ${bankroll}, Joueurs: ${numPlayers}`);
+  const winRate = evaluateOdds(hand, community, numPlayers);
+  const pct = (winRate * 100).toFixed(1);
+  console.log(`Probabilité de gagner : ${pct}%`);
 
-    let action = '';
-    let amount = 0;
-    const isPreflop = (community == null || community.length === 0);
-    if (isPreflop) {
-        // Afficher la probabilité de gagner au pré-flop et la différence par rapport à un tirage aléatoire
-        const diff = (pct - 100 / numPlayers).toFixed(1);
-        let diffColor;
-        if (Math.abs(diff) <= 4) {
-            diffColor = '\x1b[37m'; // blanc (différence neutre)
-        } else if (diff > 0) {
-            diffColor = '\x1b[32m'; // vert (meilleure que la moyenne)
-        } else {
-            diffColor = '\x1b[31m'; // rouge (pire que la moyenne)
-        }
-        console.log(`Probabilité de gagner théorique avec ${numPlayers} joueurs : ${(100 / numPlayers).toFixed(1)}% vs obtenue : ${pct}%`);
-        console.log(`${bold}Différence : ${diffColor}${diff}%${resetColor}`);
+  let action = '';
+  let amount = 0;
+  const isPreflop = (community == null || community.length === 0);
 
-        // Seuils préflop (identiques aux autres streets)
-        const foldThreshold = 0.18;
-        const callThreshold = 0.40;
-        const raiseThreshold = 0.33 - 0.10 * (aggressiveness - 1);
-
-        let action = '';
-        let amount = 0;
-        if (winRate < foldThreshold) {
-            action = 'Coucher';
-            const red = '\x1b[31m';
-            console.log(`${bold}${red}Décision pré-flop : Se coucher (Fold)${resetColor}`);
-            return { action, amount };
-        } else if (winRate < callThreshold) {
-            action = 'Suivre';
-            amount = minBet;
-            const white = '\x1b[37m';
-            if (minBet === 0) {
-                console.log(`${bold}${white}Décision pré-flop : Suivre (Check)${resetColor}`);
-            } else {
-                console.log(`${bold}Décision pré-flop : Suivre (Call) pour ${minBet}${resetColor}`);
-            }
-            return { action, amount };
-        } else {
-            // Relance agressive possible : calcul du montant optimal (max 50% du pot ou 30% de la bankroll)
-            let maxRaisePot = Math.floor(pot * 0.5);
-            let maxRaiseBankroll = Math.floor(bankroll * 0.3);
-            let maxRaise = Math.min(maxRaisePot, maxRaiseBankroll);
-            let factor = (winRate - raiseThreshold) / (1 - raiseThreshold);
-            factor = Math.max(0, Math.min(1, factor));
-            let raiseAmount = Math.floor(minBet + factor * (maxRaise - minBet));
-            if (raiseAmount < minBet) raiseAmount = minBet;
-            action = 'Relancer';
-            amount = raiseAmount;
-            const green = '\x1b[32m';
-            console.log(`${bold}${green}Décision pré-flop : Relancer à ${raiseAmount}${resetColor}`);
-            return { action, amount };
-        }
-    }
-
-    // Seuils de probabilité (configurables)
-    const foldThreshold = 0.18; // < 18% : se coucher (fold)
-    const callThreshold = 0.40; // 18-40% : suivre (call/check) si la mise est raisonnable
-    // Ajuster le seuil de relance selon l'agressivité (plus agressif -> relance avec une proba plus faible)
+  if (isPreflop) {
+    const foldThreshold = 0.18;
+    const callThreshold = 0.40;
     const raiseThreshold = 0.33 - 0.10 * (aggressiveness - 1);
 
-    // Ajuster la fréquence de bluff en fonction du nombre d'adversaires (bluffer moins si multiway)
-    let effectiveBluffFreq = bluffFrequency;
-    if (numPlayers > 2) {
-        effectiveBluffFreq *= 0.5; // réduit de moitié la fréquence de bluff si plusieurs adversaires
-    }
-
-    // Décision de se coucher (Fold) avec possibilité de bluff à la place
-    if (winRate < foldThreshold && minBet > 0) {
-        if (bluffingEnabled && Math.random() < effectiveBluffFreq) {
-            // Choisit de bluffer au lieu de folder
-            action = 'Relancer';
-            // Calcule un montant de bluff raisonnable (environ 50% du pot, au moins le double de la mise actuelle)
-            let bluffAmount = Math.floor(pot * 0.5);
-            if (bluffAmount < minBet * 2) {
-                bluffAmount = minBet * 2;
-            }
-            // Ne pas dépasser 50% de la bankroll pour un bluff
-            if (bluffAmount > bankroll * 0.5) {
-                bluffAmount = Math.floor(bankroll * 0.5);
-            }
-            if (bluffAmount <= 0) bluffAmount = minBet || 1;
-            amount = bluffAmount;
-            const magenta = '\x1b[35m';
-            console.log(`${bold}${magenta}Décision : Relancer en bluff à ${bluffAmount}${resetColor}`);
-            return { action, amount };
-        } else {
-            action = 'Coucher';
-            const red = '\x1b[31m';
-            console.log(`${bold}${red}Décision : Se coucher (Fold)${resetColor}`);
-            return { action, amount };
-        }
-    }
-
-    // Décision de suivre (Call/Check) avec possibilité de bluff d'initiative si aucune mise en face
-    if (winRate < callThreshold) {
-        // Si personne n'a misé et bluff activé, tenter parfois une mise bluff (donk bet) au lieu de checker
-        if (bluffingEnabled && minBet === 0 && Math.random() < effectiveBluffFreq) {
-            action = 'Relancer';
-            // Petit bluff : environ 50% du pot (limité à ~30% de la bankroll pour limiter les risques)
-            let bluffBet = Math.floor(pot * 0.5);
-            if (bluffBet > bankroll * 0.3) {
-                bluffBet = Math.floor(bankroll * 0.3);
-            }
-            if (bluffBet < 1) bluffBet = 1;
-            amount = bluffBet;
-            const magenta = '\x1b[35m';
-            console.log(`${bold}${magenta}Décision : Miser ${amount} en bluff${resetColor}`);
-            return { action, amount };
-        }
-
-        console.log(`-> Suivre (Call) si mise raisonnable: ${minBet} <= ${pot * 0.15} et ${minBet} <= ${bankroll * 0.10}`);
-
-        if (minBet <= pot * 0.15 && minBet <= bankroll * 0.10) {
-            action = 'Suivre';
-            amount = minBet;
-            const white = '\x1b[37m';
-            if (minBet === 0) {
-                console.log(`${bold}${white}Décision : Suivre (Check)${resetColor}`);
-            } else {
-                console.log(`${bold}Décision : Suivre (Call) pour ${minBet}${resetColor}`);
-            }
-        } else {
-            action = 'Coucher';
-            const red = '\x1b[31m';
-            console.log(`${bold}${red}Décision : Se coucher (Fold)${resetColor}`);
-        }
-        return { action, amount };
-    }
-
-    // Décision de relancer (Raise) si winRate élevé, avec contrôle du risque via agressivité et bankroll
-    const minBetPct = bankroll > 0 ? minBet / bankroll : 1;
-    if (winRate >= raiseThreshold) {
-        if (minBetPct > 0.5) {
-            // Mise trop élevée (>50% bankroll), mieux vaut se coucher même avec une bonne main
-            action = 'Coucher';
-            const red = '\x1b[31m';
-            console.log(`${bold}${red}Décision : Se coucher (Fold) car mise ${minBet} > 50% de la bankroll (${bankroll})${resetColor}`);
-            return { action, amount };
-        } else if (minBetPct > 0.3) {
-            // Mise importante (>30% bankroll) : on évite de sur-relancer, on se contente de suivre si la main est correcte
-            action = 'Suivre';
-            amount = minBet;
-            const yellow = '\x1b[33m';
-            console.log(`${bold}${yellow}Décision : Suivre (Call) car mise ${minBet} ~> 30% de la bankroll, relance trop risquée${resetColor}`);
-            return { action, amount };
-        } else {
-            // Relance agressive possible : calcul du montant optimal (max 80% du pot ou 50% de la bankroll, modulé par agressivité)
-            let maxRaisePot = Math.floor(pot * (0.8 * aggressiveness));
-            let maxRaiseBankroll = Math.floor(bankroll * (0.5 * aggressiveness));
-            let maxRaise = Math.min(maxRaisePot, maxRaiseBankroll);
-            // Déterminer la proportion de relance selon la force de la main (winRate) par rapport au seuil
-            let factor = (winRate - raiseThreshold) / (1 - raiseThreshold);
-            factor = Math.max(0, Math.min(1, factor));
-            let raiseAmount = Math.floor(minBet + factor * (maxRaise - minBet));
-            if (raiseAmount < minBet) raiseAmount = minBet;
-            action = 'Relancer';
-            amount = raiseAmount;
-            const green = '\x1b[32m';
-            console.log(`${bold}${green}Décision : Relancer (Raise) à ${raiseAmount} (calculé selon winRate et agressivité)${resetColor}`);
-            return { action, amount };
-        }
-    }
-
-    // Dernier cas : situation entre callThreshold et raiseThreshold (normalement on ne devrait pas y tomber à cause des retours précédents)
-    console.log(`-> Suivre (Call) si mise raisonnable: ${minBet} <= ${bankroll * 0.20}`);
-    if (minBet <= bankroll * 0.20) {
-        action = 'Suivre';
-        amount = minBet;
-        console.log(`${bold}Décision : Suivre (Call) pour ${minBet}${resetColor}`);
+    if (winRate < foldThreshold) {
+      action = 'Fold';
+      console.log('Décision pré-flop : Fold');
+    } else if (winRate < callThreshold) {
+      action = 'Call';
+      amount = minBet;
+      console.log(`Décision pré-flop : Call ${amount}`);
     } else {
-        action = 'Coucher';
-        const red = '\x1b[31m';
-        console.log(`${bold}${red}Décision : Se coucher (Fold)${resetColor}`);
+      action = 'Raise';
+      let maxRaise = Math.min(Math.floor(pot * 0.5), Math.floor(bankroll * 0.3));
+      let factor = (winRate - raiseThreshold) / (1 - raiseThreshold);
+      factor = Math.max(0, Math.min(1, factor));
+      amount = Math.floor(minBet + factor * (maxRaise - minBet));
+      if (amount < minBet) amount = minBet;
+      console.log(`Décision pré-flop : Raise à ${amount}`);
     }
     return { action, amount };
+  }
+
+  // après le flop
+  const foldThreshold = 0.18;
+  const callThreshold = 0.40;
+  const raiseThreshold = 0.33 - 0.10 * (aggressiveness - 1);
+  let effectiveBluffFreq = bluffFrequency;
+  if (numPlayers > 2) effectiveBluffFreq *= 0.5;
+
+  if (winRate < foldThreshold && minBet > 0) {
+    if (bluffingEnabled && Math.random() < effectiveBluffFreq) {
+      action = 'Bluff Raise';
+      amount = Math.floor(pot * 0.5);
+      if (amount > bankroll * 0.5) amount = Math.floor(bankroll * 0.5);
+      console.log(`Bluff : Raise à ${amount}`);
+    } else {
+      action = 'Fold';
+      console.log('Décision : Fold');
+    }
+    return { action, amount };
+  }
+
+  if (winRate < callThreshold) {
+    if (bluffingEnabled && minBet === 0 && Math.random() < effectiveBluffFreq) {
+      action = 'Bluff Bet';
+      amount = Math.floor(Math.min(pot * 0.5, bankroll * 0.3));
+      console.log(`Bluff d'initiative à ${amount}`);
+    } else if (minBet <= pot * 0.15 && minBet <= bankroll * 0.10) {
+      action = 'Call';
+      amount = minBet;
+      console.log(`Call raisonnable à ${amount}`);
+    } else {
+      action = 'Fold';
+      console.log('Fold : mise trop élevée');
+    }
+    return { action, amount };
+  }
+
+  // grosse main
+  const minBetPct = bankroll > 0 ? minBet / bankroll : 1;
+  if (winRate >= raiseThreshold) {
+    if (minBetPct > 0.5) {
+      action = 'Fold';
+      console.log('Fold : mise trop élevée par rapport à la bankroll');
+    } else if (minBetPct > 0.3) {
+      action = 'Call';
+      amount = minBet;
+      console.log('Call : relance trop risquée');
+    } else {
+      action = 'Raise';
+      let maxRaise = Math.min(Math.floor(pot * (0.8 * aggressiveness)), Math.floor(bankroll * (0.5 * aggressiveness)));
+      let factor = (winRate - raiseThreshold) / (1 - raiseThreshold);
+      factor = Math.max(0, Math.min(1, factor));
+      amount = Math.floor(minBet + factor * (maxRaise - minBet));
+      if (amount < minBet) amount = minBet;
+      console.log(`Relance agressive à ${amount}`);
+    }
+    return { action, amount };
+  }
+
+  // dernier cas
+  if (minBet <= bankroll * 0.20) {
+    action = 'Call';
+    amount = minBet;
+    console.log(`Call final à ${amount}`);
+  } else {
+    action = 'Fold';
+    console.log('Fold final');
+  }
+  return { action, amount };
 }
 
-// Boucle principale d'interaction
-
+// === Historique ===
 const historyPath = path.join(__dirname, 'historique.json');
-
 function loadHistory() {
-    if (fs.existsSync(historyPath)) {
-        try {
-            return JSON.parse(fs.readFileSync(historyPath, 'utf8'));
-        } catch (e) {
-            return [];
-        }
+  if (fs.existsSync(historyPath)) {
+    try {
+      return JSON.parse(fs.readFileSync(historyPath, 'utf8'));
+    } catch {
+      return [];
     }
-    return [];
+  }
+  return [];
 }
-
 function saveHistory(history) {
-    fs.writeFileSync(historyPath, JSON.stringify(history, null, 2), 'utf8');
+  fs.writeFileSync(historyPath, JSON.stringify(history, null, 2), 'utf8');
 }
-
 function createGameRow(uuid, now) {
-    return {
-        uuid,
-        date: now.toLocaleDateString(),
-        heure: now.toLocaleTimeString(),
-        steps: [] // tableau des étapes de la manche
-    };
+  return {
+    uuid,
+    date: now.toLocaleDateString(),
+    heure: now.toLocaleTimeString(),
+    steps: []
+  };
 }
-
-function updateGameRow(uuid, update) {
-    let history = loadHistory();
-    const idx = history.findIndex(row => row.uuid === uuid);
-    if (idx !== -1) {
-        history[idx] = { ...history[idx], ...update };
-        saveHistory(history);
-    }
-
-    // Ajoute une étape dans le tableau steps de la manche
-}
-
 function addStepToHistory(uuid, stepData) {
-    let history = loadHistory();
-    const idx = history.findIndex(row => row.uuid === uuid);
-    if (idx !== -1) {
-        if (!Array.isArray(history[idx].steps)) history[idx].steps = [];
-        history[idx].steps.push(stepData);
-        saveHistory(history);
-    }
+  let history = loadHistory();
+  const idx = history.findIndex(row => row.uuid === uuid);
+  if (idx !== -1) {
+    if (!Array.isArray(history[idx].steps)) history[idx].steps = [];
+    history[idx].steps.push(stepData);
+    saveHistory(history);
+  }
 }
 
+// === Gestion par street ===
+async function getStreetInput(streetName, needHand = false) {
+  let hand = null, community = null, pot = null, minBet = null, numPlayers = null, bankroll = null;
+  const screenshotsDir = path.join(__dirname, 'screenshots');
+  if (!fs.existsSync(screenshotsDir)) fs.mkdirSync(screenshotsDir);
+  const screenshotPath = path.join(screenshotsDir, `${streetName}_${Date.now()}.png`);
 
+  try {
+    await screenshot({ filename: screenshotPath, screenId: `\\\\.\\DISPLAY1` });
+  } catch (err) {
+    console.error('Erreur capture:', err);
+  }
 
+  const parsed = await OCRInput(screenshotPath, streetName, needHand);
+  hand = parsed.hand;
+  community = parsed.community;
+  pot = parsed.pot;
+  minBet = parsed.minBet;
+  numPlayers = parsed.numPlayers;
+  bankroll = parsed.bankroll;
 
+  return { hand, community, pot, minBet, numPlayers, bankroll };
+}
+
+// === Boucle principale ===
 async function pokerBot() {
-    console.clear();
-    const style = `${aggressiveness <= 0.5 ? 'Prudent' : aggressiveness <= 1 ? 'Normal' : 'Agressif'}${bluffingEnabled ? ' (Bluff actif)' : ' (Bluff inactif)'}`;
-    console.log(`=== Poker Bot - Style: ${style} ===`);
+  console.clear();
+  const style = `${aggressiveness <= 0.5 ? 'Prudent' : aggressiveness <= 1 ? 'Normal' : 'Agressif'}${bluffingEnabled ? ' (Bluff actif)' : ''}`;
+  console.log(`=== Poker Bot - Style: ${style} ===`);
 
-    const uuid = randomUUID();
-    const now = new Date();
-    let hand, pot, minBet, numPlayers, decision, bankroll;
-    let community = [];
+  const uuid = randomUUID();
+  const now = new Date();
+  let hand, pot, minBet, numPlayers, decision, bankroll;
+  let community = [];
 
-    let history = loadHistory();
-    history.push(createGameRow(uuid, now));
-    saveHistory(history);
+  let history = loadHistory();
+  history.push(createGameRow(uuid, now));
+  saveHistory(history);
 
-    // Helper pour gérer chaque street et relance éventuelle
-    async function playStreet(street, needHand = false) {
-        const input = await getStreetInput(street, needHand);
-        if (needHand) hand = input.hand;
-        community = [...community, ...(input.community || [])];
-        pot = input.pot;
-        minBet = input.minBet;
-        numPlayers = input.numPlayers;
-        if (input.bankroll !== undefined) bankroll = input.bankroll;
+  async function playStreet(street, needHand = false) {
+    const input = await getStreetInput(street, needHand);
+    if (needHand) hand = input.hand;
+    community = [...community, ...(input.community || [])];
+    pot = input.pot;
+    minBet = input.minBet;
+    numPlayers = input.numPlayers;
+    if (input.bankroll !== undefined) bankroll = input.bankroll;
+
+    decision = makeDecision(hand, community, pot, minBet, numPlayers, bankroll, aggressiveness);
+    addStepToHistory(uuid, {
+      street,
+      hand,
+      community: [...community],
+      pot,
+      minBet,
+      numPlayers,
+      bankroll,
+      decision
+    });
+
+    if (["flop", "turn", "river"].includes(street)) {
+      const relance = readlineSync.question(`Quelqu'un a-t-il relancé au ${street} ? (o/n): `, { defaultInput: 'n' }).toLowerCase();
+      if (relance === 'o') {
+        const newMinBetInput = readlineSync.question('Nouvelle mise minimale à suivre / relancer: ');
+        minBet = newMinBetInput.trim() === '' ? 0 : parseInt(newMinBetInput, 10);
+        numPlayers = parseInt(readlineSync.question('Nombre de joueurs ayant suivi la relance (incl. vous): '), 10);
         decision = makeDecision(hand, community, pot, minBet, numPlayers, bankroll, aggressiveness);
         addStepToHistory(uuid, {
-            street,
-            hand,
-            community: [...community],
-            pot,
-            minBet,
-            numPlayers,
-            bankroll,
-            decision
+          street: `${street}-relance`,
+          hand,
+          community: [...community],
+          pot,
+          minBet,
+          numPlayers,
+          bankroll,
+          decision
         });
-        // Gestion relance
-        if (["flop", "turn", "river"].includes(street)) {
-            const relance = readlineSync.question(`Quelqu'un a-t-il relancé au ${street} ? (o/n): `, { defaultInput: 'n' }).toLowerCase();
-            if (relance === 'o') {
-                const newMinBetInput = readlineSync.question('Nouvelle mise minimale à suivre / relancer: ');
-                minBet = newMinBetInput.trim() === '' ? 0 : parseInt(newMinBetInput, 10);
-                numPlayers = parseInt(readlineSync.question('Nombre de joueurs ayant suivi la relance (incl. vous): '), 10);
-                decision = makeDecision(hand, community, pot, minBet, numPlayers, bankroll, aggressiveness);
-                addStepToHistory(uuid, {
-                    street: `${street}-relance`,
-                    hand,
-                    community: [...community],
-                    pot,
-                    minBet,
-                    numPlayers,
-                    bankroll,
-                    decision
-                });
-            }
-        }
+      }
     }
+  }
 
-    await playStreet('pre-flop', true);
-    await playStreet('flop');
-    await playStreet('turn');
-    await playStreet('river');
+  await playStreet('pre-flop', true);
+  await playStreet('flop');
+  await playStreet('turn');
+  await playStreet('river');
 }
 
-
-// Lancer le bot
+// === Lancer ===
 pokerBot();
