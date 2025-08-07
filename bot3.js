@@ -6,7 +6,7 @@ const { randomUUID } = require('crypto');
 
 const aggressiveness = 1; // Niveau d'agressivité du bot (0.5 = prudent, 1 = normal, 1.5 = agressif)
 const bluffingEnabled = true; // Activer/désactiver le comportement de bluff
-const bluffFrequency = 0.2;   // Fréquence de bluff (ex. 0.2 = 20% de chances de bluffer aux situations opportunes)
+const bluffFrequency = 0.1;   // Fréquence de bluff (ex. 0.2 = 20% de chances de bluffer aux situations opportunes)
 
 // Conversion de la saisie en format poker-evaluator
 function convertCard(card) {
@@ -160,7 +160,7 @@ function makeDecision(hand, community, pot, minBet, numPlayers, bankroll, aggres
             if (bluffAmount <= 0) bluffAmount = minBet || 1;
             amount = bluffAmount;
             const magenta = '\x1b[35m';
-            console.log(`${bold}${magenta}Décision : Relancer en bluff à ${bluffAmount}${resetColor}`);
+            console.log(`${bold}${magenta}Décision : Relancer en BLUFF à ${bluffAmount}${resetColor}`);
             return { action, amount };
         } else {
             action = 'Coucher';

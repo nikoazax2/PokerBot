@@ -11,6 +11,7 @@
   "description": "",
   "dependencies": {
     "deck-of-cards": "^0.1.8",
+    "http-mitm-proxy": "^0.8.1",
     "node-tesseract-ocr": "^2.2.1",
     "poker-evaluator": "^2.1.0",
     "prompt-sync": "^4.2.0",
