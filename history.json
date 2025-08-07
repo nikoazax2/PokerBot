@@ -1,0 +1,25 @@
+[
+  {
+    "uuid": "a8d02992-5962-42f5-b72c-553b4680bf99",
+    "date": "07/08/2025",
+    "time": "18:28:20",
+    "steps": [
+      {
+        "street": "pre-flop",
+        "hand": [
+          "Kc",
+          "Kc"
+        ],
+        "community": [],
+        "pot": 8000,
+        "minBet": 0,
+        "numPlayers": 4,
+        "bankroll": 20000,
+        "decision": {
+          "action": "Raise",
+          "amount": 4000
+        }
+      }
+    ]
+  }
+]

@@ -1,66 +1,69 @@
-
 # PokerBot
 
-Un bot de poker interactif en Node.js qui aide à prendre des décisions (fold, call, raise, bluff) selon la probabilité de victoire calculée à chaque street (pré-flop, flop, turn, river). 
-C'est un bot de triche qui utilise la librairie `poker-evaluator` pour évaluer les mains de poker et déterminer la meilleure action à prendre en fonction de la situation. L'historique de chaque partie est enregistré automatiquement dans un fichier JSON.
+An interactive Poker bot in Node.js that assists in decision-making (fold, call, raise, bluff) based on calculated win probabilities at each street (pre-flop, flop, turn, river).
+This is a "cheating" bot using the `poker-evaluator` library to evaluate poker hands and determine the best action given the current situation. Each game’s history is automatically recorded in a JSON file.
 
-## Fonctionnalités
-- Saisie manuelle des cartes et des montants via le terminal
-- Calcul automatique des probabilités de victoire avec la librairie `poker-evaluator`
-- Prise de décision basée sur la probabilité, la situation (bankroll, pot, mise minimale), l'agressivité et le bluff
-- Affichage des conseils et des montants à jouer
-- Historique complet de toutes les parties dans `historique.json` (date, heure, main, communauté, bankroll, décision...)
+## Features
+
+- Manual input of cards and bet amounts via the terminal
+- Automatic calculation of winning odds using the `poker-evaluator` library
+- Decision-making logic driven by probability, game context (bankroll, pot size, minimum bet), aggressiveness, and bluff behavior
+- Display of recommended actions and bet sizes
+- Full game history saved in `historique.json` (date, time, hand, community cards, bankroll, decision, etc.)
 
 ## Installation
 
-1. Clonez le dépôt ou copiez les fichiers dans un dossier local.
-2. Installez les dépendances :
+1. Clone the repository or copy the files into a local folder.
+2. Install dependencies:
    ```bash
    npm install poker-evaluator readline-sync
    ```
 
-## Utilisation
+## Usage
 
-Lancez le bot avec Node.js :
+Run the bot with Node.js:
 ```bash
 node bot.js
 ```
+Follow the prompts in the terminal to enter your hand, community cards, pot size, bankroll, and more. The bot will advise the optimal action at each stage and record the session in the history file.
 
-Suivez les instructions dans le terminal pour entrer votre main, les cartes communes, le pot, la bankroll, etc. Le bot vous indiquera la meilleure action à chaque étape et enregistrera la partie dans l'historique.
+## Input Conventions
 
-## Conventions de saisie
+### Cards
+- Expected format: `<value><suit>`
+- Values:
+  - `1` = Ace, `2–10` = numbered cards, `11` = Jack, `12` = Queen, `13` = King
+- Suits:
+  - `co` = hearts (h)
+  - `ca` = diamonds (d)
+  - `tr` = clubs (c)
+  - `pi` = spades (s)
+- Examples:
+  - `13pi` = King of spades
+  - `2co` = 2 of hearts
 
-### Cartes
-- Format attendu : `<valeur><sorte>`
-- Valeurs :
-  - 1 = As, 2–10 = chiffres, 11 = Valet, 12 = Dame, 13 = Roi
-- Sortes :
-  - `co` = cœur (h)
-  - `ca` = carreau (d)
-  - `tr` = trèfle (c)
-  - `pi` = pique (s)
-- Exemples :
-  - `13pi` = Roi de pique
-  - `2co` = 2 de cœur
+### Bet Amounts
+- Enter amounts as numbers or with the `k` suffix for thousands.
+- Examples:
+  - `1500` ⇒ 1500
+  - `2k` ⇒ 2000
 
-### Montants
-- Les montants peuvent être saisis en chiffres ou avec le suffixe `k` pour les milliers.
-- Exemples :
-  - `1500` = 1500
-  - `2k` = 2000
+## Main Files
 
-## Fichiers principaux
-- `bot.js` : version principale du bot interactif (avec historique JSON)
-- `historique.json` : historique complet des parties jouées
+- `bot.js`: The main interactive bot script (records history to JSON)
+- `historique.json`: Full history of all games played
 
-## Personnalisation
-- Les seuils de décision (fold/call/raise) sont modifiables dans le code.
-- Le pourcentage de bankroll utilisé pour les relances est ajustable (par défaut 50%).
-- Le niveau d'agressivité et la fréquence de bluff sont configurables en haut du script.
+## Customization
 
-## Dépendances
+- Decision thresholds for fold/call/raise can be adjusted directly in the code.
+- The percentage of bankroll allocated for raises is configurable (default: 50%).
+- Aggressiveness level and bluff frequency settings are available at the top of the script.
+
+## Dependencies
+
 - [poker-evaluator](https://www.npmjs.com/package/poker-evaluator)
 - [readline-sync](https://www.npmjs.com/package/readline-sync)
 
-## Licence
-Projet open-source, libre d'utilisation et de modification.
+## License
+
+Open-source project, free to use and modify.
