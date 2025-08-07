@@ -19,17 +19,18 @@ function convertCard(card) {
     return rank + suitLetter;
 }
 
+// Conversion d'un montant texte en nombre (supporte le suffixe 'k')
+function parseAmount(input) {
+    input = input.trim().toLowerCase();
+    if (input.endsWith('k')) {
+        return parseInt(input.replace('k', ''), 10) * 1000;
+    }
+    return parseInt(input, 10);
+}
+
 // Lecture des inputs pour chaque street
 function getStreetInput(streetName, needHand = false) {
     let hand, community, pot, minBet, numPlayers, bankroll;
-
-    function parseAmount(input) {
-        input = input.trim().toLowerCase();
-        if (input.endsWith('k')) {
-            return parseInt(input.replace('k', ''), 10) * 1000;
-        }
-        return parseInt(input, 10);
-    }
 
     if (streetName == 'pre-flop') {
         bankroll = parseAmount(readlineSync.question('Votre bankroll actuelle: '));
@@ -344,7 +345,7 @@ function pokerBot() {
             const relance = readlineSync.question(`Quelqu'un a-t-il relancé au ${street} ? (o/n): `, { defaultInput: 'n' }).toLowerCase();
             if (relance === 'o') {
                 const newMinBetInput = readlineSync.question('Nouvelle mise minimale à suivre / relancer: ');
-                minBet = newMinBetInput.trim() === '' ? 0 : parseInt(newMinBetInput, 10);
+                minBet = newMinBetInput.trim() === '' ? 0 : parseAmount(newMinBetInput);
                 numPlayers = parseInt(readlineSync.question('Nombre de joueurs ayant suivi la relance (incl. vous): '), 10);
                 decision = makeDecision(hand, community, pot, minBet, numPlayers, bankroll, aggressiveness);
                 addStepToHistory(uuid, {
