@@ -1,7 +1,8 @@
 
 # PokerBot
 
-Un bot de poker interactif en Node.js qui aide à prendre des décisions (fold, call, raise, bluff) selon la probabilité de victoire calculée à chaque street (pré-flop, flop, turn, river). L'historique de chaque partie est enregistré automatiquement dans un fichier JSON.
+Un bot de poker interactif en Node.js qui aide à prendre des décisions (fold, call, raise, bluff) selon la probabilité de victoire calculée à chaque street (pré-flop, flop, turn, river). 
+C'est un bot de triche qui utilise la librairie `poker-evaluator` pour évaluer les mains de poker et déterminer la meilleure action à prendre en fonction de la situation. L'historique de chaque partie est enregistré automatiquement dans un fichier JSON.
 
 ## Fonctionnalités
 - Saisie manuelle des cartes et des montants via le terminal
