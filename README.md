@@ -22,7 +22,7 @@ Un bot de poker interactif en Node.js qui aide à prendre des décisions (fold, 
 
 Lancez le bot avec Node.js :
 ```bash
-node bot3.js
+node bot.js
 ```
 
 Suivez les instructions dans le terminal pour entrer votre main, les cartes communes, le pot, la bankroll, etc. Le bot vous indiquera la meilleure action à chaque étape et enregistrera la partie dans l'historique.
@@ -49,9 +49,7 @@ Suivez les instructions dans le terminal pour entrer votre main, les cartes comm
   - `2k` = 2000
 
 ## Fichiers principaux
-- `bot3.js` : version principale du bot interactif (avec historique JSON)
-- `bot2.js` : version précédente
-- `bot.js` : version alternative ou ancienne
+- `bot.js` : version principale du bot interactif (avec historique JSON)
 - `historique.json` : historique complet des parties jouées
 
 ## Personnalisation
