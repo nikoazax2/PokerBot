@@ -3,6 +3,11 @@
 An interactive Poker bot in Node.js that assists in decision-making (fold, call, raise, bluff) based on calculated win probabilities at each street (pre-flop, flop, turn, river).
 This is a "cheating" bot using the `poker-evaluator` library to evaluate poker hands and determine the best action given the current situation. Each game’s history is automatically recorded in a JSON file.
 
+## Use it 
+
+You can use it directly here : [![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/<ton-user>/<ton-repo>)
+
+
 ## Features
 
 - Manual input of cards and bet amounts via the terminal
