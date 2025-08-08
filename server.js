@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const PokerEvaluator = require('poker-evaluator');
 
 // ====== Settings (same defaults as your CLI) ======
@@ -160,6 +161,40 @@ app.post('/api/decide', (req, res) => {
     } catch (e) {
         res.status(400).json({ error: e.message || 'Bad request' });
     }
+});
+
+// GET /api/historique — returns the content of historique.json (French history)
+app.get('/api/historique', (req, res) => {
+    const file = path.join(__dirname, 'historique.json');
+    fs.readFile(file, 'utf8', (err, data) => {
+        if (err) {
+            if (err.code === 'ENOENT') return res.json([]);
+            return res.status(500).json({ error: 'Cannot read historique.json' });
+        }
+        try {
+            const json = JSON.parse(data || '[]');
+            res.json(json);
+        } catch (e) {
+            res.status(500).json({ error: 'Invalid JSON in historique.json' });
+        }
+    });
+});
+
+// GET /api/history — optional English history file if present
+app.get('/api/history', (req, res) => {
+    const file = path.join(__dirname, 'history.json');
+    fs.readFile(file, 'utf8', (err, data) => {
+        if (err) {
+            if (err.code === 'ENOENT') return res.json([]);
+            return res.status(500).json({ error: 'Cannot read history.json' });
+        }
+        try {
+            const json = JSON.parse(data || '[]');
+            res.json(json);
+        } catch (e) {
+            res.status(500).json({ error: 'Invalid JSON in history.json' });
+        }
+    });
 });
 
 const PORT = process.env.PORT || 3000;

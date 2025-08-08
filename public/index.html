@@ -1,132 +1,600 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PokerBot Web</title>
+    <title>PokerBot — Terminal UI</title>
     <style>
+      :root {
+        --bg: #0c0f12;
+        --fg: #c3f6c8;
+        --muted: #7ddc87;
+        --accent: #82e0ff;
+        --warn: #ffdf7e;
+        --err: #ff8a8a;
+        --panel: #0f141a;
+        --panelBorder: #25303a;
+      }
+      html,
       body {
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
-        margin: 24px;
+        height: 100%;
       }
-      .card {
-        max-width: 720px;
-        border: 1px solid #e5e7eb;
-        border-radius: 12px;
-        padding: 16px;
-        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.04);
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       }
-      label {
-        display: block;
-        font-weight: 600;
-        margin-top: 12px;
-      }
-      input,
-      select {
+      .app {
+        display: flex;
+        height: 100vh;
         width: 100%;
-        padding: 10px;
-        border: 1px solid #d1d5db;
-        border-radius: 8px;
       }
-      button {
-        margin-top: 16px;
-        padding: 10px 14px;
-        border-radius: 10px;
-        border: 0;
-        background: #111827;
-        color: white;
+      .sidebar {
+        width: 300px;
+        background: var(--panel);
+        border-right: 1px solid var(--panelBorder);
+        display: flex;
+        flex-direction: column;
+        min-width: 240px;
+        max-width: 40vw;
+      }
+      .sidebar .history-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--panelBorder);
+      }
+      .sidebar h2 {
+        font-size: 14px;
+        margin: 0;
+        color: var(--muted);
+      }
+      .history-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        overflow-y: auto;
+        flex: 1;
+      }
+      .history-item {
+        padding: 10px 12px;
+        border-bottom: 1px dashed rgba(125, 220, 135, 0.25);
+        cursor: default;
+      }
+      .history-item:hover { background: rgba(130, 224, 255, 0.05); }
+      .history-item .line1 {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .history-item .dt { color: #9fb2a1; font-size: 12px; }
+      .history-item .hand { color: var(--accent); }
+      .history-item .action { color: var(--warn); }
+      .history-item .steps { margin-top: 6px; color: #b7d8bb; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .history-empty { color: #9fb2a1; padding: 12px; }
+      .main { flex: 1; min-width: 0; }
+      .wrap {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 16px;
+      }
+      #term {
+        white-space: pre-wrap;
+      }
+      .line {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .prompt {
+        color: var(--muted);
+      }
+      input[type="text"] {
+        flex: 1;
+        background: transparent;
+        color: var(--fg);
+        border: none;
+        outline: none;
+        font: inherit;
+      }
+      .caret {
+        width: 8px;
+        height: 1.2em;
+        background: var(--fg);
+        display: inline-block;
+        animation: blink 1s step-end infinite;
+      }
+      @keyframes blink {
+        50% {
+          opacity: 0;
+        }
+      }
+      .tag {
+        color: var(--accent);
+      }
+      .warn {
+        color: var(--warn);
+      }
+      .err {
+        color: var(--err);
+      }
+      .dim {
+        color: #9fb2a1;
+      }
+      .hr {
+        opacity: 0.2;
+        border-top: 1px dashed #7aa57d;
+        margin: 8px 0;
+      }
+      .btn {
+        background: #1a1f26;
+        color: var(--fg);
+        border: 1px solid #2b343f;
+        border-radius: 4px;
+        padding: 4px 10px;
+        font: inherit;
         cursor: pointer;
       }
-      .row {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 12px;
+      .btn:hover {
+        background: #222833;
       }
-      pre {
-        background: #0b1020;
-        color: #cbd5e1;
-        padding: 12px;
-        border-radius: 10px;
-        overflow: auto;
+      .btn:focus {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+      }
+      .kbd {
+        background: #1a1f26;
+        color: #d9f8ff;
+        padding: 0 6px;
+        border-radius: 4px;
       }
     </style>
   </head>
   <body>
-    <h1>PokerBot Web</h1>
-    <div class="card">
-      <form id="f">
-        <label>Hand (e.g. <code>kc 4s</code> or <code>13c kc</code>)</label>
-        <input name="hand" placeholder="kc 4s" required />
-
-        <label>Community cards (optional, space-separated: <code>2h 7d 9c</code>)</label>
-        <input name="community" placeholder="" />
-
-        <div class="row">
+    <div class="app">
+      <aside class="sidebar" aria-label="Historique des jeux">
+        <div class="history-header">
+          <h2>Historique</h2>
           <div>
-            <label>Pot</label>
-            <input name="pot" type="number" min="0" value="100" />
-          </div>
-          <div>
-            <label>Min bet to call/raise</label>
-            <input name="minBet" type="number" min="0" value="10" />
+            <button id="btn-refresh-history" class="btn" title="Recharger l'historique">⟳</button>
           </div>
         </div>
-
-        <div class="row">
-          <div>
-            <label>Players (incl. you)</label>
-            <input name="numPlayers" type="number" min="2" value="2" />
-          </div>
-          <div>
-            <label>Bankroll</label>
-            <input name="bankroll" type="number" min="0" value="500" />
-          </div>
-        </div>
-
-        <div class="row">
-          <div>
-            <label>Aggressiveness (0.5 – 1.5)</label>
-            <input name="aggressiveness" type="number" step="0.1" min="0.5" max="1.5" value="1" />
-          </div>
-          <div>
-            <label>Bluff frequency (0–1)</label>
-            <input name="bluffFrequency" type="number" step="0.05" min="0" max="1" value="0.5" />
+        <ul id="history-list" class="history-list">
+          <li class="history-empty">Chargement…</li>
+        </ul>
+      </aside>
+      <main class="main">
+        <div class="wrap">
+          <div id="term"></div>
+          <div class="line">
+            <span class="prompt">$</span>
+            <input id="cmd" type="text" autocomplete="off" spellcheck="false" autofocus />
+            <span class="caret"></span>
+            <button id="btn-restart" class="btn" title="Restart hand (same as typing 'restart')">↺ Restart</button>
           </div>
         </div>
-
-        <label> <input type="checkbox" name="bluffingEnabled" checked /> Enable bluffing </label>
-
-        <button type="submit">Decide</button>
-      </form>
+      </main>
     </div>
 
-    <h2>Result</h2>
-    <pre id="out">—</pre>
-
     <script>
-      const form = document.getElementById("f");
-      const out = document.getElementById("out");
-      form.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const fd = new FormData(form);
-        const payload = Object.fromEntries(fd.entries());
-        payload.pot = Number(payload.pot || 0);
-        payload.minBet = Number(payload.minBet || 0);
-        payload.numPlayers = Number(payload.numPlayers || 2);
-        payload.bankroll = Number(payload.bankroll || 0);
-        payload.aggressiveness = Number(payload.aggressiveness || 1);
-        payload.bluffFrequency = Number(payload.bluffFrequency || 0);
-        payload.bluffingEnabled = fd.get("bluffingEnabled") === "on";
+      const term = document.getElementById("term");
+      const input = document.getElementById("cmd");
+      const restartBtn = document.getElementById("btn-restart");
+      const historyList = document.getElementById("history-list");
+      const refreshHistoryBtn = document.getElementById("btn-refresh-history");
 
-        out.textContent = "Thinking…";
+      // --- Session state ---
+      const S = {
+        bankroll: 0,
+        hand: [],
+        community: [],
+        pot: 0,
+        minBet: 0,
+        numPlayers: 2,
+        street: "pre-flop", // 'pre-flop' | 'flop' | 'turn' | 'river'
+        aggressiveness: 1,
+        bluffingEnabled: true,
+        bluffFrequency: 0.5,
+      };
+
+      // --- Helpers ---
+      const print = (txt = "") => {
+        term.innerHTML += txt + "\n";
+        window.scrollTo(0, document.body.scrollHeight);
+      };
+      const hr = () => {
+        term.innerHTML += '<div class="hr"></div>';
+      };
+
+      function parseCards(s) {
+        return s.trim() ? s.trim().split(/\s+/) : [];
+      }
+
+      // --- History Sidebar ---
+      async function fetchJson(url) {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+          return await res.json();
+        } catch (e) {
+          return null;
+        }
+      }
+
+      function renderHistory(items) {
+        historyList.innerHTML = '';
+        if (!items || !items.length) {
+          historyList.innerHTML = '<li class="history-empty">Aucun historique</li>';
+          return;
+        }
+        // Show newest first; assume file is already in chronological order
+        const list = items.slice().reverse().slice(0, 50);
+        for (const it of list) {
+          const date = it.date || it.time || '';
+          const time = it.heure || it.time || '';
+          const steps = Array.isArray(it.steps) ? it.steps : [];
+          const last = steps[steps.length - 1] || steps[0] || null;
+          const hand = last?.hand?.join(' ') || '—';
+          const action = last?.decision?.action || '—';
+          const amount = last?.decision?.amount != null ? last.decision.amount : null;
+          const stepsSummary = steps.map(s => `${s.street}${s.decision?.action ? ':' : ''} ${s.decision?.action || ''}${s.decision?.amount ? ' ('+s.decision.amount+')' : ''}`.trim()).join(' · ');
+
+          const li = document.createElement('li');
+          li.className = 'history-item';
+          li.innerHTML = `
+            <div class="line1">
+              <div class="dt">${date} ${time}</div>
+              <div class="hand">${hand}</div>
+            </div>
+            <div>
+              <span class="action">${action}</span>${amount != null ? ` <span class="dim">(${amount})</span>` : ''}
+            </div>
+            <div class="steps" title="${stepsSummary}">${stepsSummary || '&nbsp;'}</div>
+          `;
+          historyList.appendChild(li);
+        }
+      }
+
+      async function loadHistory() {
+        historyList.innerHTML = '<li class="history-empty">Chargement…</li>';
+        // Try French historique first, fallback to English history
+        let data = await fetchJson('/api/historique');
+        if (!Array.isArray(data) || data.length === 0) {
+          const alt = await fetchJson('/api/history');
+          if (Array.isArray(alt)) data = alt; else data = [];
+        }
+        renderHistory(data);
+      }
+
+      async function decide(label = "") {
+        const body = {
+          hand: S.hand.join(" "),
+          community: S.community.join(" "),
+          pot: S.pot,
+          minBet: S.minBet,
+          numPlayers: S.numPlayers,
+          bankroll: S.bankroll,
+          aggressiveness: S.aggressiveness,
+          bluffingEnabled: S.bluffingEnabled,
+          bluffFrequency: S.bluffFrequency,
+        };
+        print(`\n<span class="dim">[${label || S.street}] sending →</span> ${JSON.stringify(body)}`);
         const res = await fetch("/api/decide", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(body),
         });
         const data = await res.json();
-        out.textContent = JSON.stringify(data, null, 2);
+        if (data.error) {
+          print(`<span class="err">Error:</span> ${data.error}`);
+          return;
+        }
+        const { decision } = data;
+        print(
+          `→ <span class="tag">WinRate</span>: ${
+            (decision.winRate * 100 || decision.winRate).toFixed
+              ? (decision.winRate * 100).toFixed(1) + "%"
+              : decision.winRate + "%"
+          }`
+        );
+        print(
+          `→ <span class="tag">Action</span>: ${decision.action}${decision.amount ? " (" + decision.amount + ")" : ""}`
+        );
+      }
+
+      // --- State machine ---
+      let step = 0; // advances with each user input
+
+      const prompts = [
+        () =>
+          `PokerBot <span class="dim">v-web</span> — type <span class="kbd">help</span> for tips.\n` +
+          `Enter bankroll (e.g. <span class="kbd">5000</span>):`,
+        // 1 bankroll
+        // 2 hand
+        () =>
+          `Enter hand (2 cards, space-separated). Examples: <span class="kbd">Kc Ad</span>, <span class="kbd">13c 1co</span>, <span class="kbd">4pi 5tr</span>`,
+        // 3 pot
+        () => `Current pot size (e.g. <span class="kbd">1000</span>):`,
+        // 4 minBet
+        () => `Minimum to call/raise (Enter for 0):`,
+        // 5 players
+        () => `Players in hand (including you, e.g. <span class="kbd">2</span>):`,
+        // decide preflop
+        // flop sequence
+        () => `Flop cards (3, space-separated) or <span class="kbd">-</span> to skip:`,
+        () => `New pot size after flop:`,
+        () => `Minimum to call/raise after flop (Enter for 0):`,
+        () => `Players still in hand after flop (including you):`,
+        // turn
+        () => `Turn card (1) or <span class="kbd">-</span> to skip:`,
+        () => `New pot size after turn:`,
+        () => `Minimum to call/raise after turn (Enter for 0):`,
+        () => `Players still in hand after turn (including you):`,
+        // river
+        () => `River card (1) or <span class="kbd">-</span> to skip:`,
+        () => `New pot size after river:`,
+        () => `Minimum to call/raise after river (Enter for 0):`,
+        () => `Players still in hand after river (including you):`,
+        () => `Done. Type <span class="kbd">restart</span> to start a new hand.`,
+      ];
+
+      function showPrompt() {
+        print(`\n<span class="prompt">?</span> ${prompts[Math.min(step, prompts.length - 1)]()}`);
+      }
+
+      function resetSession() {
+        S.bankroll = 0;
+        S.hand = [];
+        S.community = [];
+        S.pot = 0;
+        S.minBet = 0;
+        S.numPlayers = 2;
+        S.street = "pre-flop";
+        step = 0;
+        hr();
+        print('<span class="dim">— New hand —</span>');
+        showPrompt();
+  input.value = "";
+  input.focus();
+      }
+
+      // --- Command handling ---
+      const helpText = `Commands:\n  help        Show this help\n  restart     Reset and start over\n  set aggr X  Set aggressiveness (0.5..1.5)\n  set bluff on|off  Toggle bluffing\n  set blufffreq X   Set bluff frequency (0..1)\nCard input tips:\n  Use FR (co, ca, tr, pi) or EN (h,d,c,s). Ranks 1..13 or A,K,Q,J,T.\n  Examples: Kc Ad | 13c 1co | 4pi 5tr | 7h 8h 9h`;
+
+      input.addEventListener("keydown", async (e) => {
+        if (e.key !== "Enter") return;
+        const text = input.value.trim();
+        input.value = "";
+        if (!text) {
+          showPrompt();
+          return;
+        }
+
+        // echo
+        term.innerHTML += `<span class="prompt">$</span> ${text}\n`;
+
+        // commands
+        if (text === "help") {
+          print(helpText);
+          showPrompt();
+          return;
+        }
+        if (text === "restart") {
+          resetSession();
+          return;
+        }
+        if (text.startsWith("set ")) {
+          const m = text.match(/^set\s+(aggr|bluff|blufffreq)\s+(.+)$/i);
+          if (!m) {
+            print('<span class="err">Bad set command</span>');
+            showPrompt();
+            return;
+          }
+          const [, key, val] = m;
+          if (key === "aggr") {
+            const v = Number(val);
+            if (v >= 0.5 && v <= 1.5) {
+              S.aggressiveness = v;
+              print(`aggressiveness = ${v}`);
+            } else print('<span class="err">Value must be 0.5..1.5</span>');
+          } else if (key === "bluff") {
+            S.bluffingEnabled = /^(on|true|1|yes|y)$/i.test(val);
+            print(`bluffingEnabled = ${S.bluffingEnabled}`);
+          } else if (key === "blufffreq") {
+            const v = Number(val);
+            if (v >= 0 && v <= 1) {
+              S.bluffFrequency = v;
+              print(`bluffFrequency = ${v}`);
+            } else print('<span class="err">Value must be 0..1</span>');
+          }
+          showPrompt();
+          return;
+        }
+
+        try {
+          switch (step) {
+            case 0: {
+              const n = Number(text.replace(/k$/i, "000"));
+              if (!Number.isFinite(n) || n < 0) throw "Enter a valid bankroll";
+              S.bankroll = n;
+              step++;
+              await Promise.resolve();
+              showPrompt();
+              break;
+            }
+            case 1: {
+              const cards = parseCards(text);
+              if (cards.length !== 2) throw "Enter exactly 2 cards";
+              S.hand = cards;
+              step++;
+              showPrompt();
+              break;
+            }
+            case 2: {
+              const n = Number(text.replace(/k$/i, "000"));
+              if (!Number.isFinite(n) || n < 0) throw "Enter a valid pot";
+              S.pot = n;
+              step++;
+              showPrompt();
+              break;
+            }
+            case 3: {
+              const n = text.trim() === "" ? 0 : Number(text.replace(/k$/i, "000"));
+              if (!Number.isFinite(n) || n < 0) throw "Enter a valid min bet";
+              S.minBet = n;
+              step++;
+              showPrompt();
+              break;
+            }
+            case 4: {
+              const n = Number(text);
+              if (!Number.isFinite(n) || n < 2) throw "Players must be >= 2";
+              S.numPlayers = n;
+              await decide("pre-flop");
+              S.street = "flop";
+              step++;
+              showPrompt();
+              break;
+            }
+            case 5: {
+              // flop cards
+              if (text !== "-") {
+                const cc = parseCards(text);
+                if (cc.length !== 3) throw "Enter 3 flop cards or - to skip";
+                S.community = cc; // exactly flop
+              }
+              step++;
+              showPrompt();
+              break;
+            }
+            case 6: {
+              const n = Number(text.replace(/k$/i, "000"));
+              if (!Number.isFinite(n) || n < 0) throw "Enter pot";
+              S.pot = n;
+              step++;
+              showPrompt();
+              break;
+            }
+            case 7: {
+              const n = text.trim() === "" ? 0 : Number(text.replace(/k$/i, "000"));
+              if (!Number.isFinite(n) || n < 0) throw "Enter min bet";
+              S.minBet = n;
+              step++;
+              showPrompt();
+              break;
+            }
+            case 8: {
+              const n = Number(text);
+              if (!Number.isFinite(n) || n < 2) throw "Players >=2";
+              S.numPlayers = n;
+              await decide("flop");
+              S.street = "turn";
+              step++;
+              showPrompt();
+              break;
+            }
+            case 9: {
+              if (text !== "-") {
+                const cc = parseCards(text);
+                if (cc.length !== 1) throw "Enter 1 card or -";
+                S.community.push(cc[0]);
+              }
+              step++;
+              showPrompt();
+              break;
+            }
+            case 10: {
+              const n = Number(text.replace(/k$/i, "000"));
+              if (!Number.isFinite(n) || n < 0) throw "Enter pot";
+              S.pot = n;
+              step++;
+              showPrompt();
+              break;
+            }
+            case 11: {
+              const n = text.trim() === "" ? 0 : Number(text.replace(/k$/i, "000"));
+              if (!Number.isFinite(n) || n < 0) throw "Enter min bet";
+              S.minBet = n;
+              step++;
+              showPrompt();
+              break;
+            }
+            case 12: {
+              const n = Number(text);
+              if (!Number.isFinite(n) || n < 2) throw "Players >=2";
+              S.numPlayers = n;
+              await decide("turn");
+              S.street = "river";
+              step++;
+              showPrompt();
+              break;
+            }
+            case 13: {
+              if (text !== "-") {
+                const cc = parseCards(text);
+                if (cc.length !== 1) throw "Enter 1 card or -";
+                S.community.push(cc[0]);
+              }
+              step++;
+              showPrompt();
+              break;
+            }
+            case 14: {
+              const n = Number(text.replace(/k$/i, "000"));
+              if (!Number.isFinite(n) || n < 0) throw "Enter pot";
+              S.pot = n;
+              step++;
+              showPrompt();
+              break;
+            }
+            case 15: {
+              const n = text.trim() === "" ? 0 : Number(text.replace(/k$/i, "000"));
+              if (!Number.isFinite(n) || n < 0) throw "Enter min bet";
+              S.minBet = n;
+              step++;
+              showPrompt();
+              break;
+            }
+            case 16: {
+              const n = Number(text);
+              if (!Number.isFinite(n) || n < 2) throw "Players >=2";
+              S.numPlayers = n;
+              await decide("river");
+              step++;
+              showPrompt();
+              break;
+            }
+            default: {
+              print('Type <span class="kbd">restart</span> to start a new hand, or <span class="kbd">help</span>.');
+            }
+          }
+        } catch (err) {
+          print(`<span class="err">${err}</span>`);
+          showPrompt();
+        }
       });
+
+      // intro
+      print("Welcome to <span class=tag>PokerBot</span> — Terminal UI");
+      print(
+        "Type <span class=kbd>help</span> for commands. Input cards in FR (co, ca, tr, pi) or EN (h,d,c,s); ranks 1..13 or A,K,Q,J,T."
+      );
+      showPrompt();
+
+      // buttons
+      restartBtn?.addEventListener("click", () => {
+        resetSession();
+      });
+
+      refreshHistoryBtn?.addEventListener('click', () => {
+        loadHistory();
+      });
+
+      // Initial load of history
+      loadHistory();
     </script>
   </body>
 </html>
