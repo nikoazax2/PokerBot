@@ -200,6 +200,62 @@
         bluffFrequency: 0.5,
       };
 
+      // --- Local history (stored in localStorage) ---
+      const HISTORY_KEY = 'pokerbot.history';
+      let currentSession = null; // { uuid, date, heure, steps: [...] }
+
+      function uuid() {
+        // simple UUID v4-ish
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+          const r = (Math.random() * 16) | 0;
+          const v = c === 'x' ? r : (r & 0x3) | 0x8;
+          return v.toString(16);
+        });
+      }
+
+      function nowDateHeure() {
+        const d = new Date();
+        const pad = (n) => String(n).padStart(2, '0');
+        const date = `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`;
+        const heure = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        return { date, heure };
+      }
+
+      function getLocalHistory() {
+        try {
+          const raw = localStorage.getItem(HISTORY_KEY);
+          const arr = raw ? JSON.parse(raw) : [];
+          return Array.isArray(arr) ? arr : [];
+        } catch { return []; }
+      }
+
+      function setLocalHistory(list) {
+        try {
+          localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+        } catch {}
+      }
+
+      function ensureSession() {
+        if (currentSession) return currentSession;
+        const { date, heure } = nowDateHeure();
+        currentSession = { uuid: uuid(), date, heure, steps: [] };
+        const all = getLocalHistory();
+        all.push(currentSession);
+        // keep last 200 sessions max
+        if (all.length > 200) all.splice(0, all.length - 200);
+        setLocalHistory(all);
+        return currentSession;
+      }
+
+      function appendStepToSession(step) {
+        const sess = ensureSession();
+        sess.steps.push(step);
+        const all = getLocalHistory();
+        const idx = all.findIndex(s => s.uuid === sess.uuid);
+        if (idx >= 0) all[idx] = sess; else all.push(sess);
+        setLocalHistory(all);
+      }
+
       // --- Helpers ---
       const print = (txt = "") => {
         term.innerHTML += txt + "\n";
@@ -213,28 +269,7 @@
         return s.trim() ? s.trim().split(/\s+/) : [];
       }
 
-      // --- History Sidebar ---
-      // API helper: try same-origin first, then localhost:3000; ensure JSON
-      async function apiFetchJson(pathname, opts = {}) {
-        const bases = [];
-        try { if (window.location && window.location.origin) bases.push(window.location.origin); } catch {}
-        bases.push('http://localhost:3000');
-        let lastErr = null;
-        for (const base of bases) {
-          try {
-            const url = base.replace(/\/$/, '') + pathname;
-            const res = await fetch(url, opts);
-            const ctype = res.headers.get('content-type') || '';
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            if (!/application\/json/i.test(ctype)) {
-              const text = await res.text();
-              throw new Error(`Non-JSON response from ${url}: ${text.slice(0, 80)}…`);
-            }
-            return await res.json();
-          } catch (e) { lastErr = e; }
-        }
-        if (lastErr) throw lastErr; else throw new Error('API unreachable');
-      }
+  // --- History Sidebar (load from localStorage) ---
 
       function renderHistory(items) {
         historyList.innerHTML = '';
@@ -271,18 +306,26 @@
       }
 
       async function loadHistory() {
-        historyList.innerHTML = '<li class="history-empty">Chargement…</li>';
-        try {
-          // Try French historique first, fallback to English history
-          let data = await apiFetchJson('/api/historique');
-          if (!Array.isArray(data) || data.length === 0) {
-            const alt = await apiFetchJson('/api/history').catch(() => []);
-            if (Array.isArray(alt)) data = alt; else data = [];
-          }
-          renderHistory(data);
-        } catch (e) {
-          historyList.innerHTML = `<li class="history-empty">Erreur chargement historique: ${String(e.message || e).slice(0,120)}</li>`;
+        const data = getLocalHistory();
+        renderHistory(Array.isArray(data) ? data : []);
+      }
+
+      async function decideApiFetch(body) {
+        const bases = [];
+        try { if (window.location && window.location.origin) bases.push(window.location.origin); } catch {}
+        try { if ((window.location.protocol === 'http:') && !/vercel\.app$/i.test(window.location.hostname)) bases.push('http://localhost:3000'); } catch {}
+        let lastErr;
+        for (const base of bases) {
+          try {
+            const url = base.replace(/\/$/, '') + '/api/decide';
+            const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            const ctype = res.headers.get('content-type') || '';
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            if (!/application\/json/i.test(ctype)) throw new Error(`Non-JSON from ${url}`);
+            return await res.json();
+          } catch (e) { lastErr = e; }
         }
+        throw lastErr || new Error('API unreachable');
       }
 
       async function decide(label = "") {
@@ -299,11 +342,7 @@
         };
         print(`\n<span class="dim">[${label || S.street}] sending →</span> ${JSON.stringify(body)}`);
         try {
-          const data = await apiFetchJson('/api/decide', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-          });
+          const data = await decideApiFetch(body);
           if (data.error) {
             print(`<span class="err">Error:</span> ${data.error}`);
             return;
@@ -319,6 +358,19 @@
           print(
             `→ <span class="tag">Action</span>: ${decision.action}${decision.amount ? " (" + decision.amount + ")" : ""}`
           );
+
+          // Save step to local history and refresh sidebar
+          appendStepToSession({
+            street: label || S.street,
+            hand: [...S.hand],
+            community: [...S.community],
+            pot: S.pot,
+            minBet: S.minBet,
+            numPlayers: S.numPlayers,
+            bankroll: S.bankroll,
+            decision: { action: decision.action, amount: decision.amount, winRate: decision.winRate }
+          });
+          loadHistory();
         } catch (e) {
           print(`<span class="err">API error:</span> ${String(e.message || e)}`);
         }
@@ -378,6 +430,8 @@
         showPrompt();
   input.value = "";
   input.focus();
+  // end current session (it stays in history); start fresh next time we decide
+  currentSession = null;
       }
 
       // --- Command handling ---

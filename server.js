@@ -27,7 +27,7 @@ function convertCard(card) {
         case 'co': case 'h': suitLetter = 'h'; break; // hearts
         case 'ca': case 'd': suitLetter = 'd'; break; // diamonds
         case 'tr': case 'c': suitLetter = 'c'; break; // clubs
-        case 'pi': case 's': suitLetter = 's'; break; // spades
+        case 'pi': case 'p': case 's': suitLetter = 's'; break; // spades (FR 'pi' or shorthand 'p')
         default: suitLetter = '';
     }
     return rank + suitLetter;
