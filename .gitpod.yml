@@ -1,0 +1,5 @@
+# .gitpod.yml
+image: gitpod/workspace-node
+tasks:
+  - init: npm ci
+    command: node bot.js
