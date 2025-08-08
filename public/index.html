@@ -214,14 +214,26 @@
       }
 
       // --- History Sidebar ---
-      async function fetchJson(url) {
-        try {
-          const res = await fetch(url);
-          if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
-          return await res.json();
-        } catch (e) {
-          return null;
+      // API helper: try same-origin first, then localhost:3000; ensure JSON
+      async function apiFetchJson(pathname, opts = {}) {
+        const bases = [];
+        try { if (window.location && window.location.origin) bases.push(window.location.origin); } catch {}
+        bases.push('http://localhost:3000');
+        let lastErr = null;
+        for (const base of bases) {
+          try {
+            const url = base.replace(/\/$/, '') + pathname;
+            const res = await fetch(url, opts);
+            const ctype = res.headers.get('content-type') || '';
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            if (!/application\/json/i.test(ctype)) {
+              const text = await res.text();
+              throw new Error(`Non-JSON response from ${url}: ${text.slice(0, 80)}…`);
+            }
+            return await res.json();
+          } catch (e) { lastErr = e; }
         }
+        if (lastErr) throw lastErr; else throw new Error('API unreachable');
       }
 
       function renderHistory(items) {
@@ -260,13 +272,17 @@
 
       async function loadHistory() {
         historyList.innerHTML = '<li class="history-empty">Chargement…</li>';
-        // Try French historique first, fallback to English history
-        let data = await fetchJson('/api/historique');
-        if (!Array.isArray(data) || data.length === 0) {
-          const alt = await fetchJson('/api/history');
-          if (Array.isArray(alt)) data = alt; else data = [];
+        try {
+          // Try French historique first, fallback to English history
+          let data = await apiFetchJson('/api/historique');
+          if (!Array.isArray(data) || data.length === 0) {
+            const alt = await apiFetchJson('/api/history').catch(() => []);
+            if (Array.isArray(alt)) data = alt; else data = [];
+          }
+          renderHistory(data);
+        } catch (e) {
+          historyList.innerHTML = `<li class="history-empty">Erreur chargement historique: ${String(e.message || e).slice(0,120)}</li>`;
         }
-        renderHistory(data);
       }
 
       async function decide(label = "") {
@@ -282,27 +298,30 @@
           bluffFrequency: S.bluffFrequency,
         };
         print(`\n<span class="dim">[${label || S.street}] sending →</span> ${JSON.stringify(body)}`);
-        const res = await fetch("/api/decide", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        const data = await res.json();
-        if (data.error) {
-          print(`<span class="err">Error:</span> ${data.error}`);
-          return;
+        try {
+          const data = await apiFetchJson('/api/decide', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          if (data.error) {
+            print(`<span class="err">Error:</span> ${data.error}`);
+            return;
+          }
+          const { decision } = data;
+          print(
+            `→ <span class="tag">WinRate</span>: ${
+              (decision.winRate * 100 || decision.winRate).toFixed
+                ? (decision.winRate * 100).toFixed(1) + "%"
+                : decision.winRate + "%"
+            }`
+          );
+          print(
+            `→ <span class="tag">Action</span>: ${decision.action}${decision.amount ? " (" + decision.amount + ")" : ""}`
+          );
+        } catch (e) {
+          print(`<span class="err">API error:</span> ${String(e.message || e)}`);
         }
-        const { decision } = data;
-        print(
-          `→ <span class="tag">WinRate</span>: ${
-            (decision.winRate * 100 || decision.winRate).toFixed
-              ? (decision.winRate * 100).toFixed(1) + "%"
-              : decision.winRate + "%"
-          }`
-        );
-        print(
-          `→ <span class="tag">Action</span>: ${decision.action}${decision.amount ? " (" + decision.amount + ")" : ""}`
-        );
       }
 
       // --- State machine ---

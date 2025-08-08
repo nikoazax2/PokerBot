@@ -122,6 +122,14 @@ function makeDecision(hand, community, pot, minBet, numPlayers, bankroll, aggr =
 // ====== Express app ======
 const app = express();
 app.use(express.json());
+// Simple CORS for development: allow all origins to call our APIs
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type');
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+    next();
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 // POST /api/decide  — body: { hand: 'kc 4s', community: '2h 7d 9c', pot, minBet, numPlayers, bankroll, aggressiveness, bluffingEnabled, bluffFrequency }
