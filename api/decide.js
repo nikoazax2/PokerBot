@@ -1,5 +1,26 @@
 const PokerEvaluator = require('poker-evaluator');
 
+async function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    try {
+      let data = '';
+      req.on('data', chunk => { data += chunk; });
+      req.on('end', () => {
+        const ct = (req.headers['content-type'] || '').toLowerCase();
+        if (!data) return resolve({});
+        try {
+          if (ct.includes('application/json')) return resolve(JSON.parse(data));
+          // try JSON anyway
+          return resolve(JSON.parse(data));
+        } catch (e) {
+          return reject(new Error('Invalid JSON body'));
+        }
+      });
+      req.on('error', reject);
+    } catch (e) { reject(e); }
+  });
+}
+
 function convertCard(card) {
   const c = (card || '').trim().toLowerCase();
   const m = c.match(/^(?:([1-9]|1[0-3])|([aqjkt]))(co|ca|tr|pi|p|h|d|c|s)$/i);
@@ -120,7 +141,8 @@ module.exports = async (req, res) => {
     return;
   }
   try {
-    const body = req.body || {};
+  // Vercel serverless may not populate req.body for raw Node handlers
+  const body = await readJsonBody(req);
     const {
       hand = '',
       community = '',
@@ -135,6 +157,10 @@ module.exports = async (req, res) => {
 
     const handArr = String(hand).split(/\s+/).filter(Boolean).map(convertCard);
     const commArr = String(community).split(/\s+/).filter(Boolean).map(convertCard);
+
+    if (handArr.length !== 2) {
+      return res.status(400).json({ error: 'hand must contain exactly 2 cards' });
+    }
 
     const result = makeDecision(
       handArr,
