@@ -5,7 +5,7 @@ This is a "cheating" bot using the `poker-evaluator` library to evaluate poker h
 
 ## Use it 
 
-You can use it directly here : [![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/<ton-user>/<ton-repo>)
+You can use it directly here : [![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/nikoazax2/PokerBot)
 
 
 ## Features
